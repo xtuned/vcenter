@@ -12,6 +12,12 @@ from vmware.vapi.security.user_password import create_user_password_security_con
 from vmware.vapi.security.session import create_session_security_context
 from com.vmware.appliance.update_client import Pending, Policy, Staged
 from com.vmware.appliance_client import Update, LocalAccounts
+from com.vmware.vapi.std.errors_client import Error
+from rich.console import Console
+from requests.exceptions import ConnectionError
+
+# initialize console
+console = Console()
 
 
 def get_stub_factory_config(url, username, password):
@@ -28,18 +34,23 @@ def get_stub_factory_config(url, username, password):
 
     # set the api url
     api_url = f"https://{url}/api"
-    security_context = create_user_password_security_context(username, password)
-    connector = connect.get_requests_connector(session=session, url=api_url, provider_filter_chain=[
-        LegacySecurityContextFilter(
-            security_context=security_context)])
-    session_service = Session(StubConfigurationFactory.new_std_configuration(connector))
-    session_id = session_service.create()
-    security_context = create_session_security_context(session_id)
-    connector = connect.get_requests_connector(session=session, url=api_url, provider_filter_chain=[
-        LegacySecurityContextFilter(
-            security_context=security_context)])
-    stub_config = StubConfigurationFactory.new_std_configuration(connector)
-    return stub_config
+    try:
+        security_context = create_user_password_security_context(username, password)
+        connector = connect.get_requests_connector(session=session, url=api_url, provider_filter_chain=[
+            LegacySecurityContextFilter(
+                security_context=security_context)])
+        session_service = Session(StubConfigurationFactory.new_std_configuration(connector))
+        session_id = session_service.create()
+        security_context = create_session_security_context(session_id)
+        connector = connect.get_requests_connector(session=session, url=api_url, provider_filter_chain=[
+            LegacySecurityContextFilter(
+                security_context=security_context)])
+        stub_config = StubConfigurationFactory.new_std_configuration(connector)
+        return stub_config
+    except Error:
+        console.print_exception(extra_lines=8, show_locals=True)
+    except ConnectionError:
+        console.print_exception(extra_lines=8, show_locals=True)
 
 
 class VCenterMaintenance:
@@ -67,8 +78,12 @@ class VCenterMaintenance:
         :return: list
         """
         source_type = self.pending_client.SourceType.LOCAL_AND_ONLINE
-        versions = self.pending_client.list(source_type)
-        return [json.dumps(version.__dict__, default=str) for version in versions]
+        try:
+            console.print("Checking for VCenter updates", style="green")
+            versions = self.pending_client.list(source_type)
+            return versions
+        except Error:
+            console.print_exception(extra_lines=8, show_locals=True)
 
     def get_version(self):
         """
@@ -136,13 +151,22 @@ class VCenterMaintenance:
         """
         return self.user_client.get(username)
 
-    def update_user(self, username):
+    def update_user_password_expiration_policy(self, username: str, password_expires: bool = False):
         """
-        Update a user property
-        :param username:
+        Update a user's password expiration policy
+        :param password_expires: bool: Set to True or False
+        :param username: str: username
         """
-        user_config = self.user_client.UpdateConfig(password_expires=False)
-        self.user_client.update(username, config=user_config)
+        try:
+            user_config = self.user_client.UpdateConfig(password_expires=password_expires)
+            console.print(f"Updating {username} password expiration policy",style="green")
+            policy_change = self.user_client.update(username, config=user_config)
+            if policy_change:
+                console.print(policy_change)
+            else:
+                console.print(f"{username} password expiration policy updated successfully",style="green")
+        except Error:
+            console.print_exception(extra_lines=8, show_locals=True)
 
     def install_update(self, version):
         """
