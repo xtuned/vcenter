@@ -17,7 +17,7 @@ def main():
     # initials the class
     vcenter = VCenterMaintenance(vc_url, vc_username, vc_password)
     # set root user password not to expire
-    vcenter.update_user("root")
+    vcenter.update_user_password_expiration_policy(username="root", password_expires=False)
 
 
 if __name__ == "__main__":
